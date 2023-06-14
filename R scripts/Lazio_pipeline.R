@@ -1,0 +1,506 @@
+
+################# PIPELINE for LAZIO
+### needed: 
+#dataframe of all fluxes
+#df_fin
+#Comune_Names
+#read table of Comune names
+library("readxl")
+Comune_Names <- read_excel('Denominazione_Comuni.xlsx')
+
+Province <- read_excel('Dati Provinciali.xlsx')
+
+
+############################## CHOOSE REgion -> Lazio
+
+
+code<- as.numeric(names(table(Comune_Names[Comune_Names$`Codice Regione`==12,]$`Codice Provincia`)))
+prov_choose <- code
+Region <- 'Lazio'
+
+#province_name <- Province[Province$`Codice Provincia`==prov_choose,]$`Regione/Provincia`
+#province_name
+
+
+df_part1 <- subset(df_fin,Resid_Prov %in% prov_choose & Dest_Prov %in% prov_choose)
+df_part <- df_part1
+remove(df_part1)
+
+hist(df_part$Flux,breaks = 1000)
+
+Comune_Names_prov<-subset(Comune_Names,as.numeric(`Codice Provincia`) %in% prov_choose)
+Comune_Names_prov
+
+
+#handle partial dataframe
+df_part$Resid <- as.character(df_part$Resid)
+df_part$Dest <- as.character(df_part$Dest)
+
+
+
+##########CREATE MATRIX 
+library(od)
+mat <- od_to_odmatrix(df_part)
+mat[is.na(mat)] <- 0
+
+mat <- as.matrix(mat)
+
+nrow(mat)
+ncol(mat)
+
+
+
+
+### if rows and columns of mat are different, 
+if (nrow(mat) != ncol(mat)) {
+  
+  #find same comuni
+  diff_comuni <- setdiff(rownames(mat), colnames(mat))
+  same_comuni <- setdiff(rownames(mat), diff_comuni)
+  
+  
+  
+  print(paste('array of diff comuni',diff_comuni))
+  
+  #printing out Comunes left out for analysis
+  for (el in diff_comuni){
+    id_code <- as.numeric(el)
+    print(Comune_Names[Comune_Names$Codice_Istat ==id_code ,]$Denominazione)
+    print(paste('Population:',sum(mat[el,])))
+  }
+  
+  #use only mat with same comuni
+  mat <- mat[same_comuni,same_comuni]
+}
+
+nrow(mat)
+ncol(mat)
+
+
+
+
+
+## OD Matrix representation                                             
+heatmap(mat, Colv = NA, Rowv = NA)
+
+
+
+### GRAPH ANALYSIS  and representation
+
+library(igraph)
+
+#Graph for analysis
+
+df_graph_values <- df_part
+net_an <- graph_from_data_frame(df_graph_values,directed=TRUE)
+
+
+
+## SOme indicators (CLEAN AND DECIDE) 
+cluster_tr <- round(transitivity(net_an),4)
+print(paste('Clustering coefficient is:',round(cluster_tr,3)))
+
+transitivity(net_an, type = "average")
+
+glob_ef <- round(global_efficiency(net_an),3)
+print(paste('Global efficiency is:',glob_ef))
+
+
+assortativity.degree(net_an, directed = TRUE)
+reciprocity(net_an)
+
+
+#### Comunes with max and min degree
+hist(degree(net_an, mode = c('total')),breaks = 100, main = 'Degrees of Nodes (Municipality): Lazio.',
+    xlab = 'Degrees')
+
+max(degree(net_an,mode=c('out')))
+max_deg <- which.max(degree(net_an,mode=c('out')))
+max_deg_idx <- names(max_deg)
+max_deg_idx
+Comune_Names[Comune_Names$Codice_Istat==max_deg_idx,]$Denominazione
+
+
+min(degree(net_an,mode=c('out')))
+min_deg <- which.min(degree(net_an,mode=c('out')))
+min_deg_idx <- names(min_deg)
+min_deg_idx
+Comune_Names[Comune_Names$Codice_Istat==min_deg_idx,]$Denominazione
+
+
+#edge.betweenness.community(net_an)
+
+
+### graph for representation
+df_graph <- df_part
+cutting_value = 500
+df_graph[df_graph$Resid==df_graph$Dest, ]$Flux <- 0 
+df_graph[df_graph$Flux<cutting_value,]$Flux <- 0
+df_graph <- df_graph[df_graph$Flux>0,]
+
+df_graph$Resid
+df_graph$Dest
+
+hist(df_graph$Flux, breaks = 100, main='Histogram of Flux intesity',
+     xlab = 'Flux')
+
+
+length(union(df_graph$Resid,df_graph$Dest))
+
+
+Vertex.df <- subset(Comune_Names,Codice_Istat %in% union(df_graph$Resid,df_graph$Dest))
+length(Vertex.df$Codice_Istat)
+
+
+net <- graph_from_data_frame(df_graph,directed=TRUE, vertices = Vertex.df)
+
+E(net)$weight <- (log(df_graph$Flux)-min(log(df_graph$Flux)))*2
+V(net)$size <- sqrt(Vertex.df$Popolazione)/70
+V(net)$size
+
+
+cutting_quant <- 0.93
+cutting_Population <- quantile(Vertex.df$Popolazione,cutting_quant)
+cutting_Population
+
+
+V(net)$label <- ifelse(Vertex.df$Popolazione>cutting_Population,Vertex.df$Denominazione,'')
+V(net)$label
+
+V(net)$label.cex <- 1.5
+#V(net)$label.cex
+
+#l <- layout.graphopt(net)
+l <- layout.davidson.harel(net)
+
+par(mfrow = c(1, 1))
+
+plot(net,vertex.size=V(net)$size, edge.arrow.size=0.05,vertex.label=V(net)$label, edge.width = E(net)$weight, layout =l, 
+     main=paste('Region of',Region,'. Global efficiency:', glob_ef)) 
+
+
+
+
+
+
+
+
+
+############# NEW -> INSERT VECTOR OF POPULATION 
+#PRONE TO ERRORS: NEED CHECKING
+
+length(rownames(mat))
+Populat_vec <- c()
+for ( i in 1:length(rownames(mat))){
+  code <- as.numeric(rownames(mat)[i])
+  pop <- Comune_Names[Comune_Names$Codice_Istat == code,]$Popolazione
+  if (identical(pop, numeric(0))){
+    print('Error?')
+    print(code)
+    pop <- 4209
+  }
+  Populat_vec <- c(Populat_vec,pop)
+}
+
+length(Populat_vec)
+
+
+
+### Simulation 
+################  DEFINE WAY TO CHOOSE COMUNE ACCORDING TO SOMETHING
+
+#store max and min population comune
+id_min <- Comune_Names_prov[Comune_Names_prov$Popolazione == min(Comune_Names_prov$Popolazione),]$Codice_Istat
+id_max <- Comune_Names_prov[Comune_Names_prov$Popolazione == max(Comune_Names_prov$Popolazione),]$Codice_Istat
+########### CHOOSE ZONE OF FIRST INFECTED CASES
+## the id of the location where the initial infected cases appeared
+id_min
+id_max
+max_deg_idx
+min_deg_idx
+
+zone0_id <-max_deg_idx
+
+zone0_id <- sample(rownames(mat),1)  #random sample
+name_id <- Comune_Names[Comune_Names$Codice_Istat==zone0_id,]$Denominazione
+
+zone0_id
+name_id
+
+zone0_infected <- 10 # number of initial infected cases
+beta <- 0.5 # the parameter controlling how often a susceptible-infected contact results in a new exposure
+gamma <- 0.1 # the rate an infected recovers and moves into the resistant phase (1/Recovery_Time)
+sigma <- 0.2 # the rate at which an exposed person becomes infective (1/Incubation_Time)
+max_sim <- 300 # maximum number of day simulated
+OD <- mat # load the OD matrix
+Pop <- Populat_vec #population vector
+
+Simulation_SEIR_pend <- function(zone0_infected,zone0_id,
+                                 beta,gamma,sigma,max_sim,OD, Pop){
+  
+  
+  
+  #N_k <- rowSums(OD) # population for each cell
+  N_k <- Pop
+  N_k_sum <- sum(N_k) # total population simulated
+  
+  locs_len <- length(N_k) # number of cells simulated
+  
+  
+  # set up parameters for each cell
+  beta_vec <- rep(beta, locs_len) # same transmission rate at each cell
+  sigma_vec <- rep(sigma, locs_len) # same incubation-infectious transition rate at each cell
+  gamma_vec <- rep(gamma, locs_len) # same recovery rate at each cell
+  
+  
+  # set up the SEIR matrix
+  SEIR <- matrix(nrow = locs_len, ncol = 4) # initiate an empty SEIR matrix
+  colnames(SEIR) <- c("S", "E", "I", "R") # rename the vectors
+  SEIR[, "S"] <- N_k # assign the number of susceptible people in each cell
+  SEIR[, "E"] <- 0 # assign the number of exposed people in each cell
+  SEIR[, "I"] <- 0 # assign the number of infected people in each cell
+  SEIR[, "R"] <- 0 # assign the number of recovered people in each cell
+  
+  
+  N_k_id <- rownames(OD)
+  
+  # first infection
+  first_infections <- (N_k_id == zone0_id) * zone0_infected
+  first_infections
+  # update the SEIR matrix
+  SEIR[, "S"] <- SEIR[, "S"] - first_infections
+  SEIR[, "I"] <- SEIR[, "I"] + first_infections
+  
+  # row normalize the SEIR matrix for keeping track of group proportions
+  SEIR_n <- SEIR / rowSums(SEIR)
+  SEIR_n[is.na(SEIR_n)] <- 0
+  
+  
+  # make copy of the SEIR matrix
+  SEIR_sim <- SEIR
+  SEIR_nsim <- SEIR_n
+  
+  #store results
+  #SEIR_list <- list(SEIR_nsim)
+  S_list <- c()
+  E_list <- c()
+  I_list <- c()
+  R_list <- c()
+  
+  for(i in 1:max_sim){
+    # New Exposed
+    infected_mat <- replicate(locs_len, SEIR_nsim[, "I"])
+    OD_infected <- round(OD * infected_mat) # people who are infected that travel to other locations
+    
+    inflow_infected <- colSums(OD_infected)
+    total_inflow_infected <- sum(inflow_infected)
+    #print(paste0("Total infected inflow: ", total_inflow_infected))
+    
+    
+    new_exposed <-
+      beta_vec * SEIR_sim[, "S"] * inflow_infected / (N_k + colSums(OD)) + # exposed by contacting with imported infected cases
+      beta_vec * SEIR_sim[, "S"] * SEIR_sim[, "I"] / N_k # exposed by contacting with local infected cases
+    new_exposed[is.na(new_exposed)] <- 0
+    total_new_exposed <- round(sum(new_exposed))
+    #print(paste0("New exposed: ", total_new_exposed))
+    new_exposed <- ifelse(new_exposed > SEIR_sim[, "S"], SEIR_sim[, "S"], new_exposed) # make sure the N exposed is not bigger than N susceptible
+    
+    
+    
+    # New I
+    new_infected <- sigma_vec * SEIR_sim[, "E"]
+    total_new_infected <- round(sum(new_infected, na.rm = T))
+    #print(paste0("New infected: ", total_new_infected))
+    
+    # New R
+    new_recovered <- gamma_vec * SEIR_sim[, "I"]
+    total_new_recovered <- round(sum(new_recovered, na.rm = T))
+    #print(paste0("New recovered: ", total_new_recovered))
+    SEIR_sim[, "S"] <- SEIR_sim[, "S"] - new_exposed
+    SEIR_sim[, "E"] <- SEIR_sim[, "E"] + new_exposed - new_infected
+    SEIR_sim[, "I"] <- SEIR_sim[, "I"] + new_infected - new_recovered
+    SEIR_sim[, "R"] <- SEIR_sim[, "R"] + new_recovered
+    SEIR_sim <- ifelse(SEIR_sim < 0, 0, SEIR_sim)
+    
+    # recompute the normalized SEIR matrix
+    SEIR_nsim <- SEIR_sim / rowSums(SEIR_sim)
+    SEIR_nsim[is.na(SEIR_nsim)] <- 0
+    S <- sum(SEIR_sim[, "S"]) / N_k_sum
+    E <- sum(SEIR_sim[, "E"]) / N_k_sum
+    I <- sum(SEIR_sim[, "I"]) / N_k_sum
+    R <- sum(SEIR_sim[, "R"]) / N_k_sum
+    
+    
+    #store
+    S_list <- c(S_list,S)
+    E_list <- c(E_list,E)
+    I_list <- c(I_list,I)
+    R_list <- c(R_list,R)
+    
+    #SEIR_list[[i+1]] <- SEIR_nsim
+    
+  }
+  SEIR_tot <- data.frame(S_list,E_list,I_list,R_list)
+  #SEIR_tot
+  
+  
+  return(SEIR_tot)
+}
+
+
+
+df_sim <- Simulation_SEIR_pend(zone0_infected,zone0_id,
+                               beta,gamma,sigma,max_sim,OD,Pop)
+
+#df_sim
+
+
+###PLOTTING
+times <- seq(1,max_sim,1)
+
+#name_id
+#name_id
+
+matplot(x = times, y = df_sim, type = "l",
+        xlab = "Time", ylab = "SEIR", main = paste("SEIR Model,",Region, '. Start at:',name_id),
+        lwd = 2, lty = 1, bty = "l", col = 1:4)
+
+## Add legend
+legend(length(times)-80, 0.7, c("Susceptible",'Exposed', "Infected", "Recovered"), pch = 1, col = 1:4, bty = "n")
+
+which(df_sim$I_list==max(df_sim$I_list))
+
+
+#Analyze how much changes from origin of Displacement
+
+
+
+#How much changes on variation of beta 
+#where? ROme
+zone0_id <-max_deg_idx
+name_id <- Comune_Names[Comune_Names$Codice_Istat==zone0_id,]$Denominazione
+zone0_id
+name_id
+zone0_infected <- 10 # number of initial infected cases
+#beta <- 0.5 # the parameter controlling how often a susceptible-infected contact results in a new exposure
+gamma <- 0.1 # the rate an infected recovers and moves into the resistant phase (1/Recovery_Time)
+sigma <- 0.2 # the rate at which an exposed person becomes infective (1/Incubation_Time)
+max_sim <- 500 # maximum number of day simulated
+OD <- mat # load the OD matrix
+Pop <- Populat_vec #population vector
+
+
+beta_seq <- c(0.25,0.5, 0.75, 1,1.5,3)
+
+
+Different_beta <- matrix(NA,nrow = max_sim,ncol = length(beta_seq))
+for (i in 1:length(beta_seq)){
+  beta <- beta_seq[i]
+  df_sim <- Simulation_SEIR_pend(zone0_infected,zone0_id,
+                                 beta,gamma,sigma,max_sim,OD,Pop)
+  
+  Different_beta[,i] <- df_sim$I_list
+}
+
+Different_beta <- data.frame(Different_beta)
+Different_beta
+
+
+col_beta <- rainbow(6)
+
+matplot(x = times, y = Different_beta, type = "l", 
+        xlab = "Time", ylab = "Infected rate", main = paste("Infected rate with different Beta values"),
+        lwd = 2, lty = 1, bty = "l", col =col_beta)
+
+## Add legend
+legend(length(times)-80, max(Different_beta), c(as.character(beta_seq)), pch = 1, col = col_beta, bty = "n")
+
+
+c(as.character(beta_seq))
+
+
+
+
+#How much changes on variation of gamma
+#where? ROme
+
+zone0_id <-max_deg_idx
+name_id <- Comune_Names[Comune_Names$Codice_Istat==zone0_id,]$Denominazione
+zone0_id
+name_id
+zone0_infected <- 10 # number of initial infected cases
+beta <- 0.5 # the parameter controlling how often a susceptible-infected contact results in a new exposure
+#gamma <- 0.1 # the rate an infected recovers and moves into the resistant phase (1/Recovery_Time)
+sigma <- 0.2 # the rate at which an exposed person becomes infective (1/Incubation_Time)
+max_sim <- 300 # maximum number of day simulated
+OD <- mat # load the OD matrix
+Pop <- Populat_vec #population vector
+
+
+gamma_seq <- c(0.05,0.1,0.2, 0.3, 0.4)
+
+
+Different_gamma <- matrix(NA,nrow = max_sim,ncol = length(gamma_seq))
+for (i in 1:length(gamma_seq)){
+  gamma <- gamma_seq[i]
+  df_sim <- Simulation_SEIR_pend(zone0_infected,zone0_id,
+                                 beta,gamma,sigma,max_sim,OD,Pop)
+  
+  Different_gamma[,i] <- df_sim$I_list
+}
+
+Different_gamma <- data.frame(Different_gamma)
+Different_gamma
+
+###PLOT
+col_gamma <- rainbow(5)
+
+matplot(x = times, y = Different_gamma, type = "l", 
+        xlab = "Time", ylab = "Infected rate", main = paste("Infected rate with different gamma values"),
+        lwd = 2, lty = 1, bty = "l", col =col_gamma)
+
+## Add legend
+legend(length(times)-80, max(Different_gamma), c(as.character(gamma_seq)), pch = 1, col = col_gamma, bty = "n")
+
+
+
+
+#### Varying sigma
+zone0_id <-max_deg_idx
+name_id <- Comune_Names[Comune_Names$Codice_Istat==zone0_id,]$Denominazione
+zone0_id
+name_id
+zone0_infected <- 10 # number of initial infected cases
+beta <- 0.5 # the parameter controlling how often a susceptible-infected contact results in a new exposure
+gamma <- 0.1 # the rate an infected recovers and moves into the resistant phase (1/Recovery_Time)
+sigma <- 0.2 # the rate at which an exposed person becomes infective (1/Incubation_Time)
+max_sim <- 300 # maximum number of day simulated
+OD <- mat # load the OD matrix
+Pop <- Populat_vec #population vector
+
+
+sigma_seq <- c(0.05,0.1,0.2, 0.3, 0.4)
+
+
+Different_sigma <- matrix(NA,nrow = max_sim,ncol = length(sigma_seq))
+for (i in 1:length(sigma_seq)){
+  sigma <- sigma_seq[i]
+  df_sim <- Simulation_SEIR_pend(zone0_infected,zone0_id,
+                                 beta,gamma,sigma,max_sim,OD,Pop)
+  
+  Different_sigma[,i] <- df_sim$I_list
+}
+
+Different_sigma <- data.frame(Different_sigma)
+Different_sigma
+
+###PLOT
+col_sigma <- rainbow(5)
+
+matplot(x = times, y = Different_sigma, type = "l", 
+        xlab = "Time", ylab = "Infected rate", main = paste("Infected rate with different sigma values"),
+        lwd = 2, lty = 1, bty = "l", col =col_sigma)
+
+## Add legend
+legend(length(times)-80, max(Different_sigma), c(as.character(sigma_seq)), pch = 1, col = col_sigma, bty = "n")
+
