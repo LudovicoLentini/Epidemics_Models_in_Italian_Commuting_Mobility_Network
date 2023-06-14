@@ -7,6 +7,7 @@ Handling the italian commuting mobility network to get a workable graph
 
 ### Epidemic model 
 Coding from scratch a SEIR Network model
+![image](https://github.com/LudovicoLentini/Epidemics_Models_in_Italian_Commuting_Mobility_Network/assets/91474450/8430adac-3fef-4ce1-944b-4d4f0caa516f)
 
 ### Exploring properties of SEIR
 Handling the parameters beta, gamma and sigma of the SEIR model.
